@@ -3,7 +3,7 @@
 # v1.8 - borderless full-width tray bars; red X at 0%; percentage overlay on HUD bars.
 
 $ErrorActionPreference = 'Stop'
-$RefreshSeconds = 300
+$RefreshSeconds = 60
 $RpcTimeoutMs = 15000
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -280,8 +280,12 @@ function Format-HudReset {
     try {
         $local = [DateTimeOffset]::FromUnixTimeSeconds([long]$Window.ResetsAt).ToLocalTime()
         $now = [DateTimeOffset]::Now
-        if ($local.Date -eq $now.Date) { return $local.ToString('HH:mm') }
-        return $local.ToString('MM/dd')
+        $remaining = $local - $now
+        if ($remaining.TotalHours -ge 0 -and $remaining.TotalHours -le 24) {
+    return $local.ToString('HH:mm')
+}
+
+return $local.ToString('MM/dd')
     } catch { return '--/--' }
 }
 
