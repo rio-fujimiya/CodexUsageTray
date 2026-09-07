@@ -1,6 +1,6 @@
 ﻿# CodexUsageTray.ps1
 # Windows notification-area monitor for ChatGPT Work / Codex shared agentic usage.
-# v1.7 - fix HUD click handler scope crash; make click handlers use script-scoped HUD references.
+# v1.8 - borderless full-width tray bars; red X at 0%; percentage overlay on HUD bars.
 
 $ErrorActionPreference = 'Stop'
 $RefreshSeconds = 300
@@ -160,7 +160,7 @@ function Invoke-CodexRateLimitRead {
             id = 1
             method = 'initialize'
             params = @{
-                clientInfo = @{ name = 'codex-usage-tray'; version = '1.6.0' }
+                clientInfo = @{ name = 'codex-usage-tray'; version = '1.8.0' }
                 capabilities = @{ experimentalApi = $true }
             }
         }
@@ -334,56 +334,67 @@ function Draw-GaugeBar {
         $Window,
         [bool]$HasError = $false
     )
-    $track = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(74, 79, 86))
+    $track = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(55, 60, 66))
     $fill = New-Object System.Drawing.SolidBrush (Get-GaugeColor $Window $HasError)
+    $xPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(235, 70, 70)), ([Math]::Max(2, [int][Math]::Round($Height / 5.0)))
     try {
         $Graphics.FillRectangle($track, $X, $Y, $Width, $Height)
-        if ($null -ne $Window -and -not $HasError) {
-            $pixels = [int][Math]::Round($Width * ([double]$Window.Remaining / 100.0))
-            $pixels = [Math]::Max(1, [Math]::Min($Width, $pixels))
-            $Graphics.FillRectangle($fill, $X, $Y, $pixels, $Height)
-        } elseif ($HasError) {
-            $Graphics.FillRectangle($fill, $X, $Y, $Width, $Height)
+
+        if ($HasError) {
+            # Error state: use a red X instead of pretending the quota is full/empty.
+            $pad = [Math]::Max(2, [int][Math]::Round($Height * 0.18))
+            $Graphics.DrawLine($xPen, $X + $pad, $Y + $pad, $X + $Width - $pad - 1, $Y + $Height - $pad - 1)
+            $Graphics.DrawLine($xPen, $X + $Width - $pad - 1, $Y + $pad, $X + $pad, $Y + $Height - $pad - 1)
+            return
         }
+
+        if ($null -eq $Window) { return }
+
+        $remaining = [int]$Window.Remaining
+        if ($remaining -le 0) {
+            # Exhausted bucket: a red X is much more legible than a one-pixel red bar.
+            $pad = [Math]::Max(2, [int][Math]::Round($Height * 0.18))
+            $Graphics.DrawLine($xPen, $X + $pad, $Y + $pad, $X + $Width - $pad - 1, $Y + $Height - $pad - 1)
+            $Graphics.DrawLine($xPen, $X + $Width - $pad - 1, $Y + $pad, $X + $pad, $Y + $Height - $pad - 1)
+            return
+        }
+
+        $pixels = [int][Math]::Round($Width * ([double]$remaining / 100.0))
+        $pixels = [Math]::Max(1, [Math]::Min($Width, $pixels))
+        $Graphics.FillRectangle($fill, $X, $Y, $pixels, $Height)
     } finally {
-        $track.Dispose(); $fill.Dispose()
+        $track.Dispose(); $fill.Dispose(); $xPen.Dispose()
     }
 }
-
 function New-UsageIcon {
     param($FiveHour, $Weekly, [bool]$HasError = $false)
 
-    # The notification area commonly renders at only 16-24 px. Numeric text becomes
-    # illegible there, so the icon encodes the two quotas as thick horizontal bars.
-    # Top = 5h, bottom = weekly. Green / amber / red = healthy / low / critical.
+    # The tray icon is tiny, so use only two edge-to-edge bars:
+    # top = 5h, bottom = weekly. No surrounding frame/border.
+    # A bucket at 0% is rendered as a red X across that row.
     $bmp = New-Object System.Drawing.Bitmap 32, 32
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
     $g.Clear([System.Drawing.Color]::Transparent)
 
-    $bgBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(35, 39, 44))
-    $borderPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(105, 111, 119)), 1
     try {
-        $g.FillRectangle($bgBrush, 1, 1, 30, 30)
-        $g.DrawRectangle($borderPen, 1, 1, 29, 29)
-        Draw-GaugeBar $g 5 7 22 7 $FiveHour $HasError
-        Draw-GaugeBar $g 5 19 22 7 $Weekly $HasError
+        Draw-GaugeBar $g 0 2 32 12 $FiveHour $HasError
+        Draw-GaugeBar $g 0 18 32 12 $Weekly $HasError
     } finally {
-        $bgBrush.Dispose(); $borderPen.Dispose()
+        $g.Dispose()
     }
 
     $hIcon = $bmp.GetHicon()
     $icon = ([System.Drawing.Icon]::FromHandle($hIcon)).Clone()
     [void][CodexUsageTray.NativeMethods]::DestroyIcon($hIcon)
-    $g.Dispose(); $bmp.Dispose()
+    $bmp.Dispose()
     return $icon
 }
-
 function New-Hud {
     # Windows notification-area icons are tiny. This frameless window sits just
     # above the tray and acts as a readable extended icon:
-    # 5h [quota bar] HH:mm when reset is today, otherwise MM/dd
-    # W  [quota bar] HH:mm when reset is today, otherwise MM/dd
+    # 5h [quota bar + percentage] HH:mm when reset is today, otherwise MM/dd
+    # W  [quota bar + percentage] HH:mm when reset is today, otherwise MM/dd
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'Codex Usage'
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -405,15 +416,13 @@ function New-Hud {
     $fiveLabel.Location = New-Object System.Drawing.Point(8, 5)
     $fiveLabel.Size = New-Object System.Drawing.Size(28, 20)
 
-    $fiveTrack = New-Object System.Windows.Forms.Panel
-    $fiveTrack.BackColor = [System.Drawing.Color]::FromArgb(74, 79, 86)
-    $fiveTrack.Location = New-Object System.Drawing.Point(38, 8)
-    $fiveTrack.Size = New-Object System.Drawing.Size(126, 14)
-    $fiveFill = New-Object System.Windows.Forms.Panel
-    $fiveFill.BackColor = [System.Drawing.Color]::FromArgb(115, 122, 130)
-    $fiveFill.Location = New-Object System.Drawing.Point(0, 0)
-    $fiveFill.Size = New-Object System.Drawing.Size(1, 14)
-    [void]$fiveTrack.Controls.Add($fiveFill)
+    # PictureBox lets us paint the bar and percentage into one bitmap, so the
+    # text is truly overlaid on top of the fill instead of hiding it.
+    $fiveBar = New-Object System.Windows.Forms.PictureBox
+    $fiveBar.BackColor = [System.Drawing.Color]::FromArgb(55, 60, 66)
+    $fiveBar.Location = New-Object System.Drawing.Point(38, 8)
+    $fiveBar.Size = New-Object System.Drawing.Size(126, 14)
+    $fiveBar.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Normal
 
     $fiveReset = New-Object System.Windows.Forms.Label
     $fiveReset.Text = '--:--'; $fiveReset.Font = $fontReset
@@ -429,15 +438,11 @@ function New-Hud {
     $weekLabel.Location = New-Object System.Drawing.Point(8, 29)
     $weekLabel.Size = New-Object System.Drawing.Size(28, 20)
 
-    $weekTrack = New-Object System.Windows.Forms.Panel
-    $weekTrack.BackColor = [System.Drawing.Color]::FromArgb(74, 79, 86)
-    $weekTrack.Location = New-Object System.Drawing.Point(38, 32)
-    $weekTrack.Size = New-Object System.Drawing.Size(126, 14)
-    $weekFill = New-Object System.Windows.Forms.Panel
-    $weekFill.BackColor = [System.Drawing.Color]::FromArgb(115, 122, 130)
-    $weekFill.Location = New-Object System.Drawing.Point(0, 0)
-    $weekFill.Size = New-Object System.Drawing.Size(1, 14)
-    [void]$weekTrack.Controls.Add($weekFill)
+    $weekBar = New-Object System.Windows.Forms.PictureBox
+    $weekBar.BackColor = [System.Drawing.Color]::FromArgb(55, 60, 66)
+    $weekBar.Location = New-Object System.Drawing.Point(38, 32)
+    $weekBar.Size = New-Object System.Drawing.Size(126, 14)
+    $weekBar.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Normal
 
     $weekReset = New-Object System.Windows.Forms.Label
     $weekReset.Text = '--/--'; $weekReset.Font = $fontReset
@@ -447,21 +452,17 @@ function New-Hud {
     $weekReset.Size = New-Object System.Drawing.Size(51, 21)
 
     [void]$form.Controls.AddRange(@(
-        $fiveLabel, $fiveTrack, $fiveReset,
-        $weekLabel, $weekTrack, $weekReset
+        $fiveLabel, $fiveBar, $fiveReset,
+        $weekLabel, $weekBar, $weekReset
     ))
 
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $form.Location = New-Object System.Drawing.Point(($wa.Right - $form.Width - 8), ($wa.Bottom - $form.Height - 8))
 
     # A left-button press anywhere on the HUD hides it immediately.
-    # MouseDown is used instead of Click so there is no perceptible wait for button release.
     $hideHudNow = {
         param($sender, $e)
         if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-            # Do not capture $form from New-Hud's local scope. The .NET event fires
-            # after New-Hud has returned, so that local variable is no longer safe
-            # to dereference from the callback. Use the script-scoped HUD object.
             try {
                 if ($null -ne $script:Hud -and $null -ne $script:Hud.Form) {
                     $script:Hud.Form.Hide()
@@ -473,32 +474,84 @@ function New-Hud {
         }
     }
     $form.add_MouseDown($hideHudNow)
-    foreach ($c in @($fiveLabel, $fiveTrack, $fiveFill, $fiveReset, $weekLabel, $weekTrack, $weekFill, $weekReset)) {
+    foreach ($c in @($fiveLabel, $fiveBar, $fiveReset, $weekLabel, $weekBar, $weekReset)) {
         $c.add_MouseDown($hideHudNow)
     }
 
     [pscustomobject]@{
         Form = $form
         FiveReset = $fiveReset
-        FiveTrack = $fiveTrack
-        FiveFill = $fiveFill
+        FiveBar = $fiveBar
         WeekReset = $weekReset
-        WeekTrack = $weekTrack
-        WeekFill = $weekFill
+        WeekBar = $weekBar
         FontLabel = $fontLabel
         FontReset = $fontReset
     }
 }
+
 function Set-HudWindow {
-    param($Hud, $Window, [bool]$HasError = $false)
-    if ($null -eq $Window -or $HasError) {
-        $Hud.Fill.Width = if ($HasError) { $Hud.Track.Width } else { 1 }
-        $Hud.Fill.BackColor = Get-GaugeColor $null $HasError
-        return
+    param(
+        [System.Windows.Forms.PictureBox]$Bar,
+        $Window,
+        [bool]$HasError = $false
+    )
+
+    if ($null -eq $Bar) { return }
+
+    $w = [Math]::Max(1, $Bar.ClientSize.Width)
+    $h = [Math]::Max(1, $Bar.ClientSize.Height)
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+
+    $trackBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(55, 60, 66))
+    $fillBrush = New-Object System.Drawing.SolidBrush (Get-GaugeColor $Window $HasError)
+    $xPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(235, 70, 70)), 2
+    $textBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+    $shadowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(180, 0, 0, 0))
+    $font = New-Object System.Drawing.Font('Segoe UI', 7.5, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
+    $format = New-Object System.Drawing.StringFormat
+    $format.Alignment = [System.Drawing.StringAlignment]::Center
+    $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+
+    try {
+        $g.FillRectangle($trackBrush, 0, 0, $w, $h)
+
+        $text = '--%'
+        if ($HasError) {
+            $text = 'ERR'
+            $pad = 2
+            $g.DrawLine($xPen, $pad, $pad, $w - $pad - 1, $h - $pad - 1)
+            $g.DrawLine($xPen, $w - $pad - 1, $pad, $pad, $h - $pad - 1)
+        } elseif ($null -ne $Window) {
+            $remaining = [int]$Window.Remaining
+            $text = "$remaining%"
+            if ($remaining -le 0) {
+                $pad = 2
+                $g.DrawLine($xPen, $pad, $pad, $w - $pad - 1, $h - $pad - 1)
+                $g.DrawLine($xPen, $w - $pad - 1, $pad, $pad, $h - $pad - 1)
+            } else {
+                $pixels = [int][Math]::Round($w * ([double]$remaining / 100.0))
+                $pixels = [Math]::Max(1, [Math]::Min($w, $pixels))
+                $g.FillRectangle($fillBrush, 0, 0, $pixels, $h)
+            }
+        }
+
+        # Tiny shadow keeps the overlaid percentage readable on green/amber/red fills.
+        $rectShadow = New-Object System.Drawing.RectangleF 1, 1, $w, $h
+        $rectText = New-Object System.Drawing.RectangleF 0, 0, $w, $h
+        $g.DrawString($text, $font, $shadowBrush, $rectShadow, $format)
+        $g.DrawString($text, $font, $textBrush, $rectText, $format)
+    } finally {
+        $g.Dispose()
+        $trackBrush.Dispose(); $fillBrush.Dispose(); $xPen.Dispose()
+        $textBrush.Dispose(); $shadowBrush.Dispose(); $font.Dispose(); $format.Dispose()
     }
-    $width = [int][Math]::Round($Hud.Track.Width * ([double]$Window.Remaining / 100.0))
-    $Hud.Fill.Width = [Math]::Max(1, [Math]::Min($Hud.Track.Width, $width))
-    $Hud.Fill.BackColor = Get-GaugeColor $Window $false
+
+    $old = $Bar.Image
+    $Bar.Image = $bmp
+    if ($null -ne $old) { try { $old.Dispose() } catch {} }
 }
 $script:Hud = New-Hud
 
@@ -639,8 +692,8 @@ function Update-Usage {
         $tip = "5h $fiveText% | W $weekText%"
         if ($tip.Length -gt 63) { $tip = $tip.Substring(0, 63) }
         $notify.Text = $tip
-        Set-HudWindow @{ Track = $script:Hud.FiveTrack; Fill = $script:Hud.FiveFill } $usage.FiveHour $false
-        Set-HudWindow @{ Track = $script:Hud.WeekTrack; Fill = $script:Hud.WeekFill } $usage.Weekly $false
+        Set-HudWindow $script:Hud.FiveBar $usage.FiveHour $false
+        Set-HudWindow $script:Hud.WeekBar $usage.Weekly $false
         $script:Hud.FiveReset.Text = Format-HudReset $usage.FiveHour
         $script:Hud.WeekReset.Text = Format-HudReset $usage.Weekly
         Set-TrayIcon $usage.FiveHour $usage.Weekly $false
@@ -659,8 +712,8 @@ function Update-Usage {
         $errorItem.Visible = $true
         $copyErrorItem.Enabled = $true
         $notify.Text = 'Codex usage unavailable - right-click for error'
-        Set-HudWindow @{ Track = $script:Hud.FiveTrack; Fill = $script:Hud.FiveFill } $null $true
-        Set-HudWindow @{ Track = $script:Hud.WeekTrack; Fill = $script:Hud.WeekFill } $null $true
+        Set-HudWindow $script:Hud.FiveBar $null $true
+        Set-HudWindow $script:Hud.WeekBar $null $true
         $script:Hud.FiveReset.Text = 'ERR'
         $script:Hud.WeekReset.Text = 'ERR'
         Set-TrayIcon $null $null $true
@@ -737,6 +790,8 @@ finally {
     $timer.Stop(); $timer.Dispose()
     if ($null -ne $script:TrayClickTimer) { try { $script:TrayClickTimer.Stop(); $script:TrayClickTimer.Dispose() } catch {} }
     $notify.Visible = $false; $notify.Dispose()
+    try { if ($null -ne $script:Hud.FiveBar.Image) { $script:Hud.FiveBar.Image.Dispose() } } catch {}
+    try { if ($null -ne $script:Hud.WeekBar.Image) { $script:Hud.WeekBar.Image.Dispose() } } catch {}
     try { $script:Hud.Form.Close(); $script:Hud.Form.Dispose() } catch {}
     try { $script:Hud.FontLabel.Dispose(); $script:Hud.FontReset.Dispose() } catch {}
     if ($null -ne $script:CurrentIcon) { try { $script:CurrentIcon.Dispose() } catch {} }

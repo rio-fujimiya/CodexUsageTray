@@ -1,10 +1,13 @@
-﻿# CodexUsageTray v1.7
+﻿# CodexUsageTray v1.8
 
-## v1.7 fix
+## v1.8 changes
 
-- Fixed a crash when clicking the HUD (`null 値の式ではメソッドを呼び出せません`).
-- HUD mouse handlers no longer retain a local `Form` variable after `New-Hud` returns; they use the script-scoped HUD reference instead.
-- Tray single-click/HUD visibility handlers use the same guarded script-scoped reference.
+- Tray icon outer frame/border removed.
+- Both tray quota bars now use the full 32 px icon width.
+- A quota at 0% is shown as a red X across that bar instead of a nearly invisible empty bar.
+- HUD bars now overlay the exact remaining percentage (for example `74%`).
+- The HUD also uses a red X behind `0%` when a quota is exhausted.
+- Existing HUD click-to-hide, tray click toggle, recovery notification, and ChatGPT app shortcut behavior are unchanged.
 
 Small Windows monitor for the ChatGPT Work / Codex shared agentic usage pool.
 
@@ -22,15 +25,16 @@ The installer replaces the older copy in `%LOCALAPPDATA%\CodexUsageTray`, recrea
 
 Windows notification-area icons are only about 16-32 logical pixels, so two quota bars plus readable reset text cannot be placed inside the icon itself.
 
-v1.7 uses the normal tray icon as a compact status indicator, plus a more transparent frameless always-on-top HUD immediately above the tray as the readable "extended icon":
+v1.8 uses the normal tray icon as a compact status indicator, plus a more transparent frameless always-on-top HUD immediately above the tray as the readable "extended icon":
 
 ```text
-5h  [████████░░░░]  18:42
-W   [█████░░░░░░░]  09/12
+5h  [████ 74% ░░░]  18:42
+W   [███ 38% ░░░░]  09/12
 ```
 
 - both rows: if the reset is **today**, show the reset time (`HH:mm`); otherwise show the reset date (`MM/dd`)
-- bar length: remaining quota
+- bar length: remaining quota; exact `%` is overlaid in the bar
+- 0%: red X across the exhausted bar
 - green: 50% or more remaining
 - amber: 20-49% remaining
 - red: below 20% remaining
