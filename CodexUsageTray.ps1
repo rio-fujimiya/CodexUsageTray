@@ -689,7 +689,7 @@ function Update-Usage {
         $errorItem.Visible = $false
         $copyErrorItem.Enabled = $false
         $script:LastError = ''
-        $tip = "5h $fiveText% | W $weekText%"
+        $tip = "5h ${fiveText}% $(Format-HudReset $usage.FiveHour) | W ${weekText}% $(Format-HudReset $usage.Weekly)"
         if ($tip.Length -gt 63) { $tip = $tip.Substring(0, 63) }
         $notify.Text = $tip
         Set-HudWindow $script:Hud.FiveBar $usage.FiveHour $false
