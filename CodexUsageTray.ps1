@@ -1,6 +1,6 @@
 ﻿# CodexUsageTray.ps1
 # Windows notification-area monitor for ChatGPT Work / Codex shared agentic usage.
-# v1.3 - compact tray-adjacent quota HUD: two bars + reset time/date.
+# v1.7 - fix HUD click handler scope crash; make click handlers use script-scoped HUD references.
 
 $ErrorActionPreference = 'Stop'
 $RefreshSeconds = 300
@@ -29,6 +29,27 @@ if (-not $script:Mutex.WaitOne(0, $false)) { exit 0 }
 $script:RefreshInProgress = $false
 $script:CurrentIcon = $null
 $script:LastError = ''
+$script:StatePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') 'state.json'
+$script:RecoveryState = $null
+
+$script:TrayClickTimer = $null
+
+function Open-ChatGPTApp {
+    # Use the exact Start-menu shortcut target supplied by the user.
+    # This is an AppUserModelId (AUMID), so launch it through shell:AppsFolder.
+    $appId = 'OpenAI.Codex_2p2nqsd0c76g0!App'
+    try {
+        Start-Process -FilePath 'explorer.exe' -ArgumentList ('shell:AppsFolder\' + $appId) -ErrorAction Stop | Out-Null
+        return
+    } catch {
+        try {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Could not open the configured ChatGPT app shortcut.`r`n`r`nTarget: $appId",
+                'Codex Usage Tray'
+            ) | Out-Null
+        } catch {}
+    }
+}
 
 function Get-CodexCommandLine {
     # Prefer the npm Windows shim, then a native exe.  cmd.exe can execute both.
@@ -139,7 +160,7 @@ function Invoke-CodexRateLimitRead {
             id = 1
             method = 'initialize'
             params = @{
-                clientInfo = @{ name = 'codex-usage-tray'; version = '1.3.0' }
+                clientInfo = @{ name = 'codex-usage-tray'; version = '1.6.0' }
                 capabilities = @{ experimentalApi = $true }
             }
         }
@@ -253,6 +274,43 @@ function Format-ResetTime {
     } catch { return '--' }
 }
 
+function Format-HudReset {
+    param($Window)
+    if ($null -eq $Window -or $null -eq $Window.ResetsAt) { return '--/--' }
+    try {
+        $local = [DateTimeOffset]::FromUnixTimeSeconds([long]$Window.ResetsAt).ToLocalTime()
+        $now = [DateTimeOffset]::Now
+        if ($local.Date -eq $now.Date) { return $local.ToString('HH:mm') }
+        return $local.ToString('MM/dd')
+    } catch { return '--/--' }
+}
+
+function Load-RecoveryState {
+    $default = [pscustomobject]@{ Initialized = $false; BlockedBuckets = @() }
+    if (-not (Test-Path $script:StatePath)) { return $default }
+    try {
+        $raw = Get-Content -LiteralPath $script:StatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $blocked = @()
+        if ($null -ne $raw.BlockedBuckets) { $blocked = @($raw.BlockedBuckets) }
+        return [pscustomobject]@{ Initialized = $true; BlockedBuckets = $blocked }
+    } catch {
+        return $default
+    }
+}
+
+function Save-RecoveryState {
+    param([string[]]$BlockedBuckets)
+    try {
+        $dir = Split-Path -Parent $script:StatePath
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [pscustomobject]@{
+            Version = 1
+            BlockedBuckets = @($BlockedBuckets)
+            UpdatedAt = (Get-Date).ToString('o')
+        } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatePath -Encoding UTF8
+    } catch {}
+}
+
 function Format-Remaining {
     param($Window)
     if ($null -eq $Window) { return '--' }
@@ -324,8 +382,8 @@ function New-UsageIcon {
 function New-Hud {
     # Windows notification-area icons are tiny. This frameless window sits just
     # above the tray and acts as a readable extended icon:
-    # 5h [quota bar] HH:mm
-    # W  [quota bar] MM/dd
+    # 5h [quota bar] HH:mm when reset is today, otherwise MM/dd
+    # W  [quota bar] HH:mm when reset is today, otherwise MM/dd
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'Codex Usage'
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -335,7 +393,7 @@ function New-Hud {
     $form.BackColor = [System.Drawing.Color]::FromArgb(31, 34, 38)
     $form.ForeColor = [System.Drawing.Color]::White
     $form.ClientSize = New-Object System.Drawing.Size(228, 54)
-    $form.Opacity = 0.96
+    $form.Opacity = 0.84
 
     $fontLabel = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
     $fontReset = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -396,10 +454,27 @@ function New-Hud {
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $form.Location = New-Object System.Drawing.Point(($wa.Right - $form.Width - 8), ($wa.Bottom - $form.Height - 8))
 
-    # Double-click anywhere on the HUD for an immediate refresh.
-    $form.add_DoubleClick({ Update-Usage })
+    # A left-button press anywhere on the HUD hides it immediately.
+    # MouseDown is used instead of Click so there is no perceptible wait for button release.
+    $hideHudNow = {
+        param($sender, $e)
+        if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+            # Do not capture $form from New-Hud's local scope. The .NET event fires
+            # after New-Hud has returned, so that local variable is no longer safe
+            # to dereference from the callback. Use the script-scoped HUD object.
+            try {
+                if ($null -ne $script:Hud -and $null -ne $script:Hud.Form) {
+                    $script:Hud.Form.Hide()
+                }
+                if ($null -ne $script:HudMenuItem) {
+                    $script:HudMenuItem.Checked = $false
+                }
+            } catch {}
+        }
+    }
+    $form.add_MouseDown($hideHudNow)
     foreach ($c in @($fiveLabel, $fiveTrack, $fiveFill, $fiveReset, $weekLabel, $weekTrack, $weekFill, $weekReset)) {
-        $c.add_DoubleClick({ Update-Usage })
+        $c.add_MouseDown($hideHudNow)
     }
 
     [pscustomobject]@{
@@ -456,6 +531,7 @@ $errorItem.Text = 'Error: none'; $errorItem.Enabled = $false; $errorItem.Visible
 
 $hudItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $hudItem.Text = 'Show extended tray HUD'; $hudItem.Checked = $true; $hudItem.CheckOnClick = $true
+$script:HudMenuItem = $hudItem
 [void]$menu.Items.Add($hudItem)
 
 $refreshItem = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -485,6 +561,67 @@ function Set-TrayIcon {
     if ($null -ne $oldIcon) { try { $oldIcon.Dispose() } catch {} }
 }
 
+function Show-RecoveredNotification {
+    param($Usage)
+    try {
+        $five = Format-Remaining $Usage.FiveHour
+        $week = Format-Remaining $Usage.Weekly
+        $notify.BalloonTipTitle = 'Work / Codex is available again'
+        $notify.BalloonTipText = "Usage limit reset. 5h $five% | W $week%"
+        $notify.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
+        $notify.ShowBalloonTip(7000)
+    } catch {}
+}
+
+function Update-RecoveryState {
+    param($Usage)
+
+    if ($null -eq $script:RecoveryState) {
+        $script:RecoveryState = Load-RecoveryState
+    }
+
+    $current = @{
+        '5h' = $Usage.FiveHour
+        'W'  = $Usage.Weekly
+    }
+    $previousBlocked = @($script:RecoveryState.BlockedBuckets)
+    $blockedNow = New-Object System.Collections.Generic.List[string]
+
+    # A reported window at 0% blocks use. If a window that was previously blocking
+    # disappears from the API, keep it blocked/unknown instead of falsely announcing recovery.
+    foreach ($name in @('5h', 'W')) {
+        $window = $current[$name]
+        if ($null -ne $window -and [int]$window.Remaining -le 0) {
+            [void]$blockedNow.Add($name)
+        } elseif ($null -eq $window -and $previousBlocked -contains $name) {
+            [void]$blockedNow.Add($name)
+        }
+    }
+
+    $recovered = $false
+    if ($script:RecoveryState.Initialized -and $previousBlocked.Count -gt 0) {
+        $allPreviousBlockersRecovered = $true
+        foreach ($name in $previousBlocked) {
+            $window = $current[$name]
+            if ($null -eq $window -or [int]$window.Remaining -le 0) {
+                $allPreviousBlockersRecovered = $false
+                break
+            }
+        }
+        if ($allPreviousBlockersRecovered -and $blockedNow.Count -eq 0) {
+            $recovered = $true
+        }
+    }
+
+    $script:RecoveryState = [pscustomobject]@{
+        Initialized = $true
+        BlockedBuckets = @($blockedNow.ToArray())
+    }
+    Save-RecoveryState -BlockedBuckets $script:RecoveryState.BlockedBuckets
+
+    if ($recovered) { Show-RecoveredNotification $Usage }
+}
+
 function Update-Usage {
     if ($script:RefreshInProgress) { return }
     $script:RefreshInProgress = $true
@@ -504,18 +641,10 @@ function Update-Usage {
         $notify.Text = $tip
         Set-HudWindow @{ Track = $script:Hud.FiveTrack; Fill = $script:Hud.FiveFill } $usage.FiveHour $false
         Set-HudWindow @{ Track = $script:Hud.WeekTrack; Fill = $script:Hud.WeekFill } $usage.Weekly $false
-        $script:Hud.FiveReset.Text = Format-ResetTime $usage.FiveHour
-        if ($null -eq $usage.Weekly -or $null -eq $usage.Weekly.ResetsAt) {
-            $script:Hud.WeekReset.Text = '--/--'
-        } else {
-            try {
-                $weekLocal = [DateTimeOffset]::FromUnixTimeSeconds([long]$usage.Weekly.ResetsAt).ToLocalTime()
-                $script:Hud.WeekReset.Text = $weekLocal.ToString('MM/dd')
-            } catch {
-                $script:Hud.WeekReset.Text = '--/--'
-            }
-        }
+        $script:Hud.FiveReset.Text = Format-HudReset $usage.FiveHour
+        $script:Hud.WeekReset.Text = Format-HudReset $usage.Weekly
         Set-TrayIcon $usage.FiveHour $usage.Weekly $false
+        Update-RecoveryState $usage
     }
     catch {
         $message = $_.Exception.Message
@@ -541,11 +670,39 @@ function Update-Usage {
 
 $hudItem.add_CheckedChanged({
     try {
-        if ($hudItem.Checked) { $script:Hud.Form.Show() } else { $script:Hud.Form.Hide() }
+        if ($null -eq $script:HudMenuItem -or $null -eq $script:Hud -or $null -eq $script:Hud.Form) { return }
+        if ($script:HudMenuItem.Checked) { $script:Hud.Form.Show() } else { $script:Hud.Form.Hide() }
     } catch {}
 })
 $refreshItem.add_Click({ Update-Usage })
-$notify.add_DoubleClick({ Update-Usage })
+
+# Single left-click toggles the HUD, but defer the action long enough to let a
+# double-click cancel it. This prevents a double-click from briefly hiding/showing
+# the HUD before ChatGPT opens.
+$script:TrayClickTimer = New-Object System.Windows.Forms.Timer
+$script:TrayClickTimer.Interval = [Math]::Max(180, [System.Windows.Forms.SystemInformation]::DoubleClickTime + 40)
+$script:TrayClickTimer.add_Tick({
+    $script:TrayClickTimer.Stop()
+    try {
+        if ($null -ne $script:HudMenuItem) {
+            $script:HudMenuItem.Checked = -not $script:HudMenuItem.Checked
+        }
+    } catch {}
+})
+$notify.add_MouseClick({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        $script:TrayClickTimer.Stop()
+        $script:TrayClickTimer.Start()
+    }
+})
+$notify.add_MouseDoubleClick({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        $script:TrayClickTimer.Stop()
+        Open-ChatGPTApp
+    }
+})
 $copyErrorItem.add_Click({
     try {
         if (-not [string]::IsNullOrWhiteSpace($script:LastError)) {
@@ -577,7 +734,9 @@ $script:Hud.Form.Show()
 Update-Usage
 try { [System.Windows.Forms.Application]::Run() }
 finally {
-    $timer.Stop(); $timer.Dispose(); $notify.Visible = $false; $notify.Dispose()
+    $timer.Stop(); $timer.Dispose()
+    if ($null -ne $script:TrayClickTimer) { try { $script:TrayClickTimer.Stop(); $script:TrayClickTimer.Dispose() } catch {} }
+    $notify.Visible = $false; $notify.Dispose()
     try { $script:Hud.Form.Close(); $script:Hud.Form.Dispose() } catch {}
     try { $script:Hud.FontLabel.Dispose(); $script:Hud.FontReset.Dispose() } catch {}
     if ($null -ne $script:CurrentIcon) { try { $script:CurrentIcon.Dispose() } catch {} }
