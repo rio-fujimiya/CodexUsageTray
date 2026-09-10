@@ -1,94 +1,70 @@
-﻿# CodexUsageTray v1.8
+# CodexUsageTray v2.0 ngrok
 
-## v1.8 changes
+Windows side for the Android Codex / ChatGPT Work usage widget.
 
-- Tray icon outer frame/border removed.
-- Both tray quota bars now use the full 32 px icon width.
-- A quota at 0% is shown as a red X across that bar instead of a nearly invisible empty bar.
-- HUD bars now overlay the exact remaining percentage (for example `74%`).
-- The HUD also uses a red X behind `0%` when a quota is exhausted.
-- Existing HUD click-to-hide, tray click toggle, recovery notification, and ChatGPT app shortcut behavior are unchanged.
+## Components
 
-Small Windows monitor for the ChatGPT Work / Codex shared agentic usage pool.
+- `CodexUsageTray.ps1`: reads `account/rateLimits/read` and exports `usage-cache.json`
+- `CodexUsageRelay.ps1`: bearer-authenticated read-only API on localhost
+- `Configure-Ngrok.ps1`: binds your free assigned ngrok dev domain to that relay
+- `Start-Ngrok.ps1`: starts ngrok hidden at Windows login
 
-## Install / update
+## 0. Environment
 
-Run this from the extracted folder:
+Activated `Codex-CLI` is required.
+
+## 1. Install/update
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-The installer replaces the older copy in `%LOCALAPPDATA%\CodexUsageTray`, recreates the Startup shortcut, and launches the new version.
+(Optional) Keep the printed **Android relay token** private.
 
-## Display
+## 2. (Optional) Install and authenticate ngrok
 
-Windows notification-area icons are only about 16-32 logical pixels, so two quota bars plus readable reset text cannot be placed inside the icon itself.
-
-v1.8 uses the normal tray icon as a compact status indicator, plus a more transparent frameless always-on-top HUD immediately above the tray as the readable "extended icon":
-
-```text
-5h  [████ 74% ░░░]  18:42
-W   [███ 38% ░░░░]  09/12
-```
-
-- both rows: if the reset is **today**, show the reset time (`HH:mm`); otherwise show the reset date (`MM/dd`)
-- bar length: remaining quota; exact `%` is overlaid in the bar
-- 0%: red X across the exhausted bar
-- green: 50% or more remaining
-- amber: 20-49% remaining
-- red: below 20% remaining
-
-Exact percentages remain available from the tray tooltip / right-click menu, e.g. `5h 74% | W 38%`.
-
-- **Single left-click the tray icon:** toggle HUD show/hide
-- **Double left-click the tray icon:** open the configured ChatGPT Windows app shortcut (`OpenAI.Codex_2p2nqsd0c76g0!App`)
-- Right-click the tray icon and toggle **Show extended tray HUD** to hide/show the HUD
-- **Left-click anywhere on the HUD:** hide it immediately
-- Choose **Refresh now** for an immediate refresh
-
-HUD opacity is 84% (more transparent than v1.4). Automatic refresh is every 5 minutes.
-
-## Recovery notification
-
-If quota exhaustion made Work / Codex unusable, the app remembers which quota window was blocking. When all previously blocking windows are reported above 0% again, it sends a Windows notification:
-
-```text
-Work / Codex is available again
-Usage limit reset. 5h 100% | W 38%
-```
-
-No notification is sent on the first successful read when there is no prior saved state, so a fresh install does not create a false recovery alert. The blocking state is persisted in `%LOCALAPPDATA%\CodexUsageTray\state.json`, so recovery can still be detected across app restarts. If a previously blocking quota disappears from the API response, the app waits rather than falsely announcing recovery.
-
-If OpenAI does not report one quota window, its bar is empty and its reset display becomes `--:--` / `--/--`. This is intentionally different from an RPC error, which is displayed as `ERR`.
-
-## Usage unavailable
-
-Right-click the tray icon and choose **Run diagnostics...**. The diagnostics verify:
-
-1. Codex CLI discovery
-2. Codex CLI version
-3. ChatGPT login status
-4. `codex doctor`
-5. raw `account/rateLimits/read` exchange
-
-Useful checks:
+Install ngrok, for example:
 
 ```powershell
-codex.cmd --version
-codex.cmd login status
+winget install ngrok -s msstore
 ```
 
-If needed:
+Then add the authtoken from your ngrok dashboard:
 
 ```powershell
-codex.cmd login
+ngrok config add-authtoken <YOUR_AUTHTOKEN>
 ```
 
-and sign in with ChatGPT.
+## 3. (Optional) Configure your assigned dev domain
 
-## Usage / credit cost
+Your free account has one automatically assigned dev domain, such as:
 
-Each refresh starts a hidden `codex app-server --stdio`, performs the initialization handshake, calls `account/rateLimits/read`, then terminates it.
+```text
+your-assigned-name.ngrok-free.app
+```
 
-It does **not** start a model turn, so the monitor does not intentionally consume model tokens / agentic allowance. It only performs a small account-metadata request every five minutes.
+Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\CodexUsageTray\Configure-Ngrok.ps1" -DevDomain your-assigned-name.ngrok-free.app
+```
+
+This creates `CodexUsageNgrok.lnk` in Startup and launches ngrok hidden. On later Windows logins it reconnects to the same dev domain.
+
+## 4. (Optional) Android URL
+
+Use:
+
+```text
+https://your-assigned-name.ngrok-free.app
+```
+
+The Android client sends `ngrok-skip-browser-warning: 1` and the separate relay bearer token.
+
+## Local relay test
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\CodexUsageTray\Test-Relay.ps1"
+```
+
+No router port forwarding or Windows Firewall inbound rule for 8765 is required.

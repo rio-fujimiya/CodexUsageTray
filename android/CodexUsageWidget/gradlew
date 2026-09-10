@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+URL="https://raw.githubusercontent.com/gradle/gradle/v9.3.1/gradle/wrapper/gradle-wrapper.jar"
+SHA="b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13"
+
+if [ ! -f "$JAR" ]; then
+  echo "Downloading Gradle wrapper..."
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$URL" -o "$JAR"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$URL" -O "$JAR"
+  else
+    echo "curl or wget is required to bootstrap Gradle." >&2
+    exit 1
+  fi
+fi
+
+ACTUAL=$(sha256sum "$JAR" | awk '{print $1}')
+if [ "$ACTUAL" != "$SHA" ]; then
+  echo "Gradle wrapper checksum mismatch." >&2
+  rm -f "$JAR"
+  exit 1
+fi
+
+exec java -classpath "$JAR" org.gradle.wrapper.GradleWrapperMain "$@"

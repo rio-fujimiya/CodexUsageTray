@@ -1,9 +1,9 @@
 ﻿# CodexUsageTray.ps1
 # Windows notification-area monitor for ChatGPT Work / Codex shared agentic usage.
-# v1.8 - borderless full-width tray bars; red X at 0%; percentage overlay on HUD bars.
+# v2.0 ngrok - v1.8 UI plus usage-cache.json export for the local WAN relay.
 
 $ErrorActionPreference = 'Stop'
-$RefreshSeconds = 60
+$RefreshSeconds = 300
 $RpcTimeoutMs = 15000
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -30,6 +30,7 @@ $script:RefreshInProgress = $false
 $script:CurrentIcon = $null
 $script:LastError = ''
 $script:StatePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') 'state.json'
+$script:UsageCachePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') 'usage-cache.json'
 $script:RecoveryState = $null
 
 $script:TrayClickTimer = $null
@@ -280,13 +281,43 @@ function Format-HudReset {
     try {
         $local = [DateTimeOffset]::FromUnixTimeSeconds([long]$Window.ResetsAt).ToLocalTime()
         $now = [DateTimeOffset]::Now
-        $remaining = $local - $now
-        if ($remaining.TotalHours -ge 0 -and $remaining.TotalHours -le 24) {
-    return $local.ToString('HH:mm')
+        if ($local.Date -eq $now.Date) { return $local.ToString('HH:mm') }
+        return $local.ToString('MM/dd')
+    } catch { return '--/--' }
 }
 
-return $local.ToString('MM/dd')
-    } catch { return '--/--' }
+
+function Save-UsageCache {
+    param($Usage)
+
+    function Convert-CacheWindow {
+        param($Window)
+        if ($null -eq $Window) { return $null }
+        return [ordered]@{
+            windowMinutes = [int]$Window.Minutes
+            remainingPercent = [int]$Window.Remaining
+            resetsAt = if ($null -ne $Window.ResetsAt) { [long]$Window.ResetsAt } else { $null }
+        }
+    }
+
+    try {
+        $dir = Split-Path -Parent $script:UsageCachePath
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+
+        $payload = [ordered]@{
+            version = 1
+            updatedAt = [DateTimeOffset]::Now.ToUnixTimeSeconds()
+            planType = $Usage.PlanType
+            fiveHour = (Convert-CacheWindow $Usage.FiveHour)
+            weekly = (Convert-CacheWindow $Usage.Weekly)
+        }
+
+        $tmp = $script:UsageCachePath + '.tmp'
+        $payload | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8
+        Move-Item -LiteralPath $tmp -Destination $script:UsageCachePath -Force
+    } catch {
+        # Cache export must never break the tray UI.
+    }
 }
 
 function Load-RecoveryState {
@@ -693,7 +724,7 @@ function Update-Usage {
         $errorItem.Visible = $false
         $copyErrorItem.Enabled = $false
         $script:LastError = ''
-        $tip = "5h ${fiveText}% $(Format-HudReset $usage.FiveHour) | W ${weekText}% $(Format-HudReset $usage.Weekly)"
+        $tip = "5h $fiveText% | W $weekText%"
         if ($tip.Length -gt 63) { $tip = $tip.Substring(0, 63) }
         $notify.Text = $tip
         Set-HudWindow $script:Hud.FiveBar $usage.FiveHour $false
@@ -702,6 +733,7 @@ function Update-Usage {
         $script:Hud.WeekReset.Text = Format-HudReset $usage.Weekly
         Set-TrayIcon $usage.FiveHour $usage.Weekly $false
         Update-RecoveryState $usage
+        Save-UsageCache $usage
     }
     catch {
         $message = $_.Exception.Message

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Codex Usage</string>
+    <string name="widget_description">Codex / ChatGPT Work usage remaining and reset time</string>
+</resources>

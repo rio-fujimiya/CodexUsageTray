@@ -1,17 +1,25 @@
-$ErrorActionPreference = 'SilentlyContinue'
+﻿$ErrorActionPreference = 'SilentlyContinue'
 
 $dest = Join-Path $env:LOCALAPPDATA 'CodexUsageTray'
-$scriptPath = Join-Path $dest 'CodexUsageTray.ps1'
 $startup = [Environment]::GetFolderPath('Startup')
-$shortcutPath = Join-Path $startup 'CodexUsageTray.lnk'
+Remove-Item (Join-Path $startup 'CodexUsageTray.lnk') -Force
+Remove-Item (Join-Path $startup 'CodexUsageRelay.lnk') -Force
+Remove-Item (Join-Path $startup 'CodexUsageNgrok.lnk') -Force
 
-Remove-Item $shortcutPath -Force
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+    Where-Object {
+        $_.CommandLine -and (
+            $_.CommandLine.IndexOf((Join-Path $dest 'CodexUsageTray.ps1'), [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $_.CommandLine.IndexOf((Join-Path $dest 'CodexUsageRelay.ps1'), [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $_.CommandLine.IndexOf((Join-Path $dest 'Start-Ngrok.ps1'), [StringComparison]::OrdinalIgnoreCase) -ge 0
+        )
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
-# Stop only PowerShell processes whose command line contains this exact installed script path.
-Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($scriptPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains('8765') } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
 Start-Sleep -Milliseconds 300
 Remove-Item $dest -Recurse -Force
-Write-Host 'CodexUsageTray uninstalled.'
+Write-Host 'CodexUsageTray + relay + ngrok startup uninstalled.'
