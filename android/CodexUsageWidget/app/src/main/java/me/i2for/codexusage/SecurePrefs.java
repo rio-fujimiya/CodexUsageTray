@@ -6,6 +6,7 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 
@@ -27,6 +28,11 @@ final class SecurePrefs {
         String normalized = normalizeBaseUrl(baseUrl);
         if (!normalized.startsWith("https://")) {
             throw new IllegalArgumentException("URL must start with https://");
+        }
+        URI uri = URI.create(normalized);
+        String host = uri.getHost();
+        if (host == null || !(host.endsWith(".ngrok-free.app") || host.endsWith(".ngrok.app"))) {
+            throw new IllegalArgumentException("URL must be an ngrok assigned dev domain");
         }
         if (token == null || token.trim().length() < 32) {
             throw new IllegalArgumentException("Bearer token is missing or too short");

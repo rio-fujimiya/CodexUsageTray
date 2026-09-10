@@ -15,6 +15,7 @@ captures/
 *.keystore
 keystore.properties
 signing.properties
+relay-token.txt
 
 # ngrok / relay local secrets & runtime files
 ngrok.yml

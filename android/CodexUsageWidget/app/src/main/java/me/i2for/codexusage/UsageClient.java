@@ -5,6 +5,7 @@ import android.content.Context;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -12,6 +13,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 final class UsageClient {
+    private static final int MAX_BODY_CHARS = 64 * 1024;
+
     private UsageClient() {}
 
     static UsageData fetch(Context context) throws Exception {
@@ -63,7 +66,12 @@ final class UsageClient {
         StringBuilder sb = new StringBuilder();
         try (BufferedReader r = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             String line;
-            while ((line = r.readLine()) != null) sb.append(line);
+            while ((line = r.readLine()) != null) {
+                sb.append(line);
+                if (sb.length() > MAX_BODY_CHARS) {
+                    throw new IOException("Response body too large");
+                }
+            }
         }
         return sb.toString();
     }
