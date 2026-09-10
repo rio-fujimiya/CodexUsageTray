@@ -3,7 +3,7 @@
 # v2.0 ngrok - v1.8 UI plus usage-cache.json export for the local WAN relay.
 
 $ErrorActionPreference = 'Stop'
-$RefreshSeconds = 300
+$RefreshSeconds = 60
 $RpcTimeoutMs = 15000
 
 Add-Type -AssemblyName System.Windows.Forms
