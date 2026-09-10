@@ -22,7 +22,7 @@ final class UsageScheduler {
                 .build();
 
         PeriodicWorkRequest req = new PeriodicWorkRequest.Builder(
-                UsageWorker.class, 15, TimeUnit.MINUTES)
+                UsageWorker.class, 5, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build();
 
