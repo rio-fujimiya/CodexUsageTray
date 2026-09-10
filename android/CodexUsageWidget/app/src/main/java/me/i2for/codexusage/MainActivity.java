@@ -1,9 +1,11 @@
 package me.i2for.codexusage;
 
+import android.Manifest;
 import android.app.Activity;
 import android.appwidget.AppWidgetManager;
 import android.content.Intent;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.ViewGroup;
@@ -79,6 +81,7 @@ public final class MainActivity extends Activity {
 
         save.setOnClickListener(v -> saveAndTest());
         setContentView(root);
+        requestNotificationPermissionIfNeeded();
     }
 
     private void saveAndTest() {
@@ -124,6 +127,17 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> status.setText("接続失敗: " + e.getMessage()));
             }
         }).start();
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    1001
+            );
+        }
     }
 
     private int dp(int value) {
