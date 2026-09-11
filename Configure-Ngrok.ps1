@@ -9,6 +9,8 @@ $startup = [Environment]::GetFolderPath('Startup')
 $shortcutPath = Join-Path $startup 'CodexUsageNgrok.lnk'
 $domainPath = Join-Path $dest 'ngrok-domain.txt'
 $startScript = Join-Path $dest 'Start-Ngrok.ps1'
+$startVbs = Join-Path $dest 'Start-Ngrok.vbs'
+$wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
 
 $domain = $DevDomain.Trim().ToLowerInvariant()
 $domain = $domain -replace '^https?://', ''
@@ -28,12 +30,16 @@ if ($null -eq $ngrokCommand) {
 New-Item -ItemType Directory -Path $dest -Force | Out-Null
 Set-Content -LiteralPath $domainPath -Value $domain -Encoding ASCII -NoNewline
 
+if (-not (Test-Path -LiteralPath $startVbs)) {
+    throw "Start-Ngrok.vbs was not found. Re-run Install.ps1 from v2.1 or later."
+}
+
 $ws = New-Object -ComObject WScript.Shell
 $shortcut = $ws.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = (Join-Path $PSHOME 'powershell.exe')
-$shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $startScript + '"'
+$shortcut.TargetPath = $wscript
+$shortcut.Arguments = '"' + $startVbs + '"'
 $shortcut.WorkingDirectory = $dest
-$shortcut.Description = 'ngrok fixed dev domain for Codex usage widget'
+$shortcut.Description = 'ngrok fixed dev domain for Codex usage widget (silent startup)'
 $shortcut.Save()
 
 # Restart only this app's ngrok process if it already exists.
@@ -42,9 +48,8 @@ Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction SilentlyCo
     ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }
 Start-Sleep -Milliseconds 300
 
-Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -WindowStyle Hidden `
-    -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $startScript + '"')
-
+# Launch through wscript so Configure-Ngrok itself cannot leave an ngrok console behind.
+Start-Process -FilePath $wscript -ArgumentList ('"' + $startVbs + '"') | Out-Null
 
 $tokenPath = Join-Path $dest 'relay-token.txt'
 if (Test-Path -LiteralPath $tokenPath) {
@@ -71,7 +76,7 @@ if (Test-Path -LiteralPath $tokenPath) {
 Write-Host ''
 Write-Host 'ngrok fixed endpoint configured.'
 Write-Host "Public URL: https://$domain"
-Write-Host "Startup shortcut: $shortcutPath"
+Write-Host "Startup shortcut: $shortcutPath -> wscript.exe"
 Write-Host ''
 Write-Host 'Android URL:'
 Write-Host "https://$domain"

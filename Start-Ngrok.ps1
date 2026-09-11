@@ -19,6 +19,22 @@ $alreadyRunning = Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -Erro
     Select-Object -First 1
 if ($null -ne $alreadyRunning) { exit 0 }
 
-Start-Process -FilePath $ngrokExe -WindowStyle Hidden `
-    -ArgumentList @('http', '8765', '--log', 'stdout', '--log-format', 'json') `
-    -RedirectStandardOutput $logPath -RedirectStandardError $errorLogPath
+# Launch ngrok without allocating/inheriting a console window.
+# ngrok writes its own logs directly to the file, so no console pipes are needed.
+try {
+    if (Test-Path -LiteralPath $errorLogPath) { Remove-Item -LiteralPath $errorLogPath -Force -ErrorAction SilentlyContinue }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $ngrokExe
+    $psi.Arguments = 'http 8765 --log "' + $logPath + '" --log-format json'
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.WorkingDirectory = $dest
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    if (-not $proc.Start()) { throw 'ngrok process failed to start.' }
+} catch {
+    $_ | Out-String | Set-Content -LiteralPath $errorLogPath -Encoding UTF8
+    exit 1
+}
