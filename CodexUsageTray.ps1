@@ -323,7 +323,7 @@ function Format-ResetCredits {
         }
         elseif ($Credits.DetailsComplete) { $expiry = 'no expiry' }
     }
-    if ($Compact) { return "Resets $count | Exp $expiry" }
+    if ($Compact) { return "R $count | $expiry" }
     return "Resets: $count | Earliest expiry: $expiry"
 }
 
@@ -523,7 +523,7 @@ function New-Hud {
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $form.BackColor = [System.Drawing.Color]::FromArgb(31, 34, 38)
     $form.ForeColor = [System.Drawing.Color]::White
-    $form.ClientSize = New-Object System.Drawing.Size(300, 72)
+    $form.ClientSize = New-Object System.Drawing.Size(260, 72)
     $form.Opacity = 0.84
 
     $fontLabel = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -541,14 +541,14 @@ function New-Hud {
     $fiveBar = New-Object System.Windows.Forms.PictureBox
     $fiveBar.BackColor = [System.Drawing.Color]::FromArgb(55, 60, 66)
     $fiveBar.Location = New-Object System.Drawing.Point(38, 8)
-    $fiveBar.Size = New-Object System.Drawing.Size(198, 14)
+    $fiveBar.Size = New-Object System.Drawing.Size(158, 14)
     $fiveBar.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Normal
 
     $fiveReset = New-Object System.Windows.Forms.Label
     $fiveReset.Text = '--:--'; $fiveReset.Font = $fontReset
     $fiveReset.ForeColor = [System.Drawing.Color]::FromArgb(230, 232, 235)
     $fiveReset.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $fiveReset.Location = New-Object System.Drawing.Point(241, 4)
+    $fiveReset.Location = New-Object System.Drawing.Point(201, 4)
     $fiveReset.Size = New-Object System.Drawing.Size(51, 21)
 
     $weekLabel = New-Object System.Windows.Forms.Label
@@ -561,14 +561,14 @@ function New-Hud {
     $weekBar = New-Object System.Windows.Forms.PictureBox
     $weekBar.BackColor = [System.Drawing.Color]::FromArgb(55, 60, 66)
     $weekBar.Location = New-Object System.Drawing.Point(38, 32)
-    $weekBar.Size = New-Object System.Drawing.Size(198, 14)
+    $weekBar.Size = New-Object System.Drawing.Size(158, 14)
     $weekBar.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Normal
 
     $weekReset = New-Object System.Windows.Forms.Label
     $weekReset.Text = '--/--'; $weekReset.Font = $fontReset
     $weekReset.ForeColor = [System.Drawing.Color]::FromArgb(230, 232, 235)
     $weekReset.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $weekReset.Location = New-Object System.Drawing.Point(241, 28)
+    $weekReset.Location = New-Object System.Drawing.Point(201, 28)
     $weekReset.Size = New-Object System.Drawing.Size(51, 21)
 
     $accountLabel = New-Object System.Windows.Forms.Label
@@ -582,9 +582,9 @@ function New-Hud {
     $resetCreditsLabel = New-Object System.Windows.Forms.Label
     $resetCreditsLabel.Text = Format-ResetCredits $null -Compact
     $resetCreditsLabel.Font = $fontReset
-    $resetCreditsLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $resetCreditsLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
     $resetCreditsLabel.Location = New-Object System.Drawing.Point(80, 0)
-    $resetCreditsLabel.Size = New-Object System.Drawing.Size(212, 18)
+    $resetCreditsLabel.Size = New-Object System.Drawing.Size(172, 18)
 
 
     [void]$form.Controls.AddRange(@(
@@ -895,7 +895,7 @@ function Update-Usage {
         $fiveResetItem.Text = '5h reset: --'
         $weekResetItem.Text = 'W reset: --'
         $resetCreditsItem.Text = Format-ResetCredits $null
-        $script:Hud.ResetCredits.Text = 'Resets -- | Exp ERR'
+        $script:Hud.ResetCredits.Text = 'R -- | ERR'
         $updatedItem.Text = "Failed: $(Get-Date -Format 'HH:mm:ss')"
         $short = $message
         if ($short.Length -gt 180) { $short = $short.Substring(0, 177) + '...' }

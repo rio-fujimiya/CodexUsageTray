@@ -1,4 +1,4 @@
-# CodexUsageTray v2.0 ngrok
+﻿# CodexUsageTray v2.0 ngrok
 
 Windows side for the Android Codex / ChatGPT Work usage widget.
 
@@ -24,7 +24,7 @@ and `no expiry` means all available resets have no expiry. A date marked `*`
 is the earliest known expiry because the service returned incomplete details.
 Reset credits are only read, never consumed. Requires a CLI version that returns
 `rateLimitResetCredits` from `account/rateLimits/read`.
-The HUD is 300 x 72 pixels, with the account name and reset credits on one row.
+The HUD is 260 x 72 pixels, with the account name and right-aligned reset credits on one row above the quota reset times. `R` is the available reset count; the following date is its earliest expiry.
 
 Offline reset-credit checks: `powershell -NoProfile -File .\Test-ResetCredits.ps1`.
 

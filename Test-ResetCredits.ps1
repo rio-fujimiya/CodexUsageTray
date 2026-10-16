@@ -1,4 +1,4 @@
-# Offline reset-credit parsing and HUD text checks. No credentials or RPC.
+﻿# Offline reset-credit parsing and HUD text checks. No credentials or RPC.
 $ErrorActionPreference = 'Stop'
 $tokens = $null; $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -33,14 +33,14 @@ $credits = $usage.ResetCredits
 Assert ($credits.AvailableCount -eq 3 -and $credits.EarliestExpiresAt -eq $early) 'Wrong count or earliest available expiry.'
 Assert $credits.DetailsComplete 'Available detail completeness is incorrect.'
 $expected = [DateTimeOffset]::FromUnixTimeSeconds($early).ToLocalTime().ToString('MM/dd HH:mm')
-Assert ((Format-ResetCredits $credits -Compact) -eq "Resets 3 | Exp $expected") 'HUD date is incorrect.'
+Assert ((Format-ResetCredits $credits -Compact) -eq "R 3 | $expected") 'HUD date is incorrect.'
 Assert ((Format-ResetCredits $null) -eq 'Resets: -- | Earliest expiry: --') 'Missing summary must be unknown.'
 $countOnly = Convert-ResetCredits ([pscustomobject]@{availableCount = 2; credits = $null})
-Assert ((Format-ResetCredits $countOnly -Compact) -eq 'Resets 2 | Exp --') 'Count-only response must not imply no expiry.'
+Assert ((Format-ResetCredits $countOnly -Compact) -eq 'R 2 | --') 'Count-only response must not imply no expiry.'
 $empty = Convert-ResetCredits ([pscustomobject]@{availableCount = 0; credits = @()})
-Assert ((Format-ResetCredits $empty -Compact) -eq 'Resets 0 | Exp none') 'Zero response is incorrect.'
+Assert ((Format-ResetCredits $empty -Compact) -eq 'R 0 | none') 'Zero response is incorrect.'
 $unlimited = Convert-ResetCredits ([pscustomobject]@{availableCount = 1; credits = @(@{status='available'; expiresAt=$null})})
-Assert ((Format-ResetCredits $unlimited -Compact) -eq 'Resets 1 | Exp no expiry') 'Non-expiring response is incorrect.'
+Assert ((Format-ResetCredits $unlimited -Compact) -eq 'R 1 | no expiry') 'Non-expiring response is incorrect.'
 $partial = Convert-ResetCredits ([pscustomobject]@{availableCount = 10; credits = @(@{status='available'; expiresAt=$early})})
 Assert ((Format-ResetCredits $partial -Compact).EndsWith('*')) 'Capped details must be marked.'
 Add-Type -AssemblyName System.Windows.Forms

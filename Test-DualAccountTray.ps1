@@ -1,4 +1,4 @@
-# Offline regression checks: real WinForms and cache files, mocked usage RPC.
+﻿# Offline regression checks: real WinForms and cache files, mocked usage RPC.
 param(
     [ValidateSet('DEFAULT', 'ECC')]
     [string]$Account,
@@ -136,7 +136,7 @@ try {
     $cache = Get-Content $script:UsageCachePath -Raw | ConvertFrom-Json
     Assert-True ($cache.fiveHour.remainingPercent -eq $script:Remaining) 'Usage cache has incorrect data.'
     Assert-True ($cache.resetCredits.AvailableCount -eq $script:Remaining) 'Reset credits cache has incorrect account data.'
-    Assert-True ($script:Hud.ResetCredits.Text -eq "Resets $($script:Remaining) | Exp --") 'HUD reset count is incorrect.'
+    Assert-True ($script:Hud.ResetCredits.Text -eq "R $($script:Remaining) | --") 'HUD reset count is incorrect.'
     Assert-True ($resetCreditsItem.Text -eq "Resets: $($script:Remaining) | Earliest expiry: --") 'Menu reset count is incorrect.'
 
     $savedRemaining = $script:Remaining
@@ -153,7 +153,7 @@ try {
     Update-Usage
     Assert-True ($script:LastError -eq 'Simulated account read failure') 'Read failure was not handled.'
     Assert-True ($notify.Text -like "$Account - Usage unavailable*") 'Error tooltip lacks account.'
-    Assert-True ($script:Hud.ResetCredits.Text -eq 'Resets -- | Exp ERR') 'Failed read left stale reset credits visible.'
+    Assert-True ($script:Hud.ResetCredits.Text -eq 'R -- | ERR') 'Failed read left stale reset credits visible.'
     Assert-True ((Get-Content $script:UsageCachePath -Raw) -eq $cacheBefore) 'Failed read corrupted cache.'
     Assert-True (-not $script:RefreshInProgress) 'Failed read left refresh locked.'
     $script:FailRead = $false
