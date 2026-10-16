@@ -50,6 +50,10 @@ $function = $ast.Find({ param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-Hud'
 }, $true)
 . ([scriptblock]::Create($function.Extent.Text))
+$formatter = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Format-ResetCredits'
+}, $true)
+. ([scriptblock]::Create($formatter.Extent.Text))
 # Also exercises the account label when run on the dual-account branch.
 $Account = 'ECC'
 $script:Hud = New-Hud

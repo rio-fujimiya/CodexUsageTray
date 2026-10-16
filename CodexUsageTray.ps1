@@ -286,8 +286,45 @@ function Get-CodexUsage {
         FiveHour = $five
         Weekly = $week
         PlanType = Get-PropertyValue $limits 'planType'
+        ResetCredits = Convert-ResetCredits (Get-PropertyValue $result 'rateLimitResetCredits')
         UpdatedAt = Get-Date
     }
+}
+
+function Convert-ResetCredits {
+    param($Summary)
+    $count = Get-PropertyValue $Summary 'availableCount'
+    if ($null -eq $count) { return $null }
+    $rows = Get-PropertyValue $Summary 'credits'
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $available = @($rows | Where-Object {
+        $null -ne $_ -and $_.status -eq 'available' -and
+        ($null -eq $_.expiresAt -or [long]$_.expiresAt -gt $now)
+    })
+    $expiring = @($available | Where-Object { $null -ne $_.expiresAt } |
+        Sort-Object { [long]$_.expiresAt })
+    [pscustomobject]@{
+        AvailableCount = [int]$count
+        EarliestExpiresAt = if ([int]$count -gt 0 -and $expiring.Count -gt 0) { [long]$expiring[0].expiresAt } else { $null }
+        DetailsComplete = ($null -ne $rows -and $available.Count -eq [int]$count)
+    }
+}
+
+function Format-ResetCredits {
+    param($Credits, [switch]$Compact)
+    $count = if ($null -eq $Credits) { '--' } else { [string]$Credits.AvailableCount }
+    $expiry = '--'
+    if ($null -ne $Credits) {
+        if ($Credits.AvailableCount -eq 0) { $expiry = 'none' }
+        elseif ($null -ne $Credits.EarliestExpiresAt) {
+            $format = if ($Compact) { 'MM/dd HH:mm' } else { 'yyyy/MM/dd HH:mm' }
+            $expiry = [DateTimeOffset]::FromUnixTimeSeconds($Credits.EarliestExpiresAt).ToLocalTime().ToString($format)
+            if (-not $Credits.DetailsComplete) { $expiry += '*' }
+        }
+        elseif ($Credits.DetailsComplete) { $expiry = 'no expiry' }
+    }
+    if ($Compact) { return "Resets $count | Exp $expiry" }
+    return "Resets: $count | Earliest expiry: $expiry"
 }
 
 function Format-ResetTime {
@@ -335,6 +372,7 @@ function Save-UsageCache {
             planType = $Usage.PlanType
             fiveHour = (Convert-CacheWindow $Usage.FiveHour)
             weekly = (Convert-CacheWindow $Usage.Weekly)
+            resetCredits = $Usage.ResetCredits
         }
 
         $tmp = $script:UsageCachePath + '.tmp'
@@ -485,7 +523,7 @@ function New-Hud {
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $form.BackColor = [System.Drawing.Color]::FromArgb(31, 34, 38)
     $form.ForeColor = [System.Drawing.Color]::White
-    $form.ClientSize = New-Object System.Drawing.Size(228, 72)
+    $form.ClientSize = New-Object System.Drawing.Size(300, 72)
     $form.Opacity = 0.84
 
     $fontLabel = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -503,14 +541,14 @@ function New-Hud {
     $fiveBar = New-Object System.Windows.Forms.PictureBox
     $fiveBar.BackColor = [System.Drawing.Color]::FromArgb(55, 60, 66)
     $fiveBar.Location = New-Object System.Drawing.Point(38, 8)
-    $fiveBar.Size = New-Object System.Drawing.Size(126, 14)
+    $fiveBar.Size = New-Object System.Drawing.Size(198, 14)
     $fiveBar.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Normal
 
     $fiveReset = New-Object System.Windows.Forms.Label
     $fiveReset.Text = '--:--'; $fiveReset.Font = $fontReset
     $fiveReset.ForeColor = [System.Drawing.Color]::FromArgb(230, 232, 235)
     $fiveReset.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $fiveReset.Location = New-Object System.Drawing.Point(169, 4)
+    $fiveReset.Location = New-Object System.Drawing.Point(241, 4)
     $fiveReset.Size = New-Object System.Drawing.Size(51, 21)
 
     $weekLabel = New-Object System.Windows.Forms.Label
@@ -523,29 +561,36 @@ function New-Hud {
     $weekBar = New-Object System.Windows.Forms.PictureBox
     $weekBar.BackColor = [System.Drawing.Color]::FromArgb(55, 60, 66)
     $weekBar.Location = New-Object System.Drawing.Point(38, 32)
-    $weekBar.Size = New-Object System.Drawing.Size(126, 14)
+    $weekBar.Size = New-Object System.Drawing.Size(198, 14)
     $weekBar.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Normal
 
     $weekReset = New-Object System.Windows.Forms.Label
     $weekReset.Text = '--/--'; $weekReset.Font = $fontReset
     $weekReset.ForeColor = [System.Drawing.Color]::FromArgb(230, 232, 235)
     $weekReset.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $weekReset.Location = New-Object System.Drawing.Point(169, 28)
+    $weekReset.Location = New-Object System.Drawing.Point(241, 28)
     $weekReset.Size = New-Object System.Drawing.Size(51, 21)
 
     $accountLabel = New-Object System.Windows.Forms.Label
     $accountLabel.Text = $Account
     $accountLabel.Font = $fontLabel
     $accountLabel.Location = New-Object System.Drawing.Point(8, 0)
-    $accountLabel.Size = New-Object System.Drawing.Size(212, 18)
+    $accountLabel.Size = New-Object System.Drawing.Size(72, 18)
     foreach ($control in @($fiveLabel, $fiveBar, $fiveReset, $weekLabel, $weekBar, $weekReset)) {
         $control.Top += 18
     }
+    $resetCreditsLabel = New-Object System.Windows.Forms.Label
+    $resetCreditsLabel.Text = Format-ResetCredits $null -Compact
+    $resetCreditsLabel.Font = $fontReset
+    $resetCreditsLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $resetCreditsLabel.Location = New-Object System.Drawing.Point(80, 0)
+    $resetCreditsLabel.Size = New-Object System.Drawing.Size(212, 18)
+
 
     [void]$form.Controls.AddRange(@(
         $accountLabel,
         $fiveLabel, $fiveBar, $fiveReset,
-        $weekLabel, $weekBar, $weekReset
+        $weekLabel, $weekBar, $weekReset, $resetCreditsLabel
     ))
 
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
@@ -614,6 +659,7 @@ function New-Hud {
         FiveBar = $fiveBar
         WeekReset = $weekReset
         WeekBar = $weekBar
+        ResetCredits = $resetCreditsLabel
         FontLabel = $fontLabel
         FontReset = $fontReset
     }
@@ -705,6 +751,12 @@ $fiveResetItem.Text = '5h reset: --'; $fiveResetItem.Enabled = $false
 $weekResetItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $weekResetItem.Text = 'W reset: --'; $weekResetItem.Enabled = $false
 [void]$menu.Items.Add($weekResetItem)
+
+$resetCreditsItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$resetCreditsItem.Text = Format-ResetCredits $null; $resetCreditsItem.Enabled = $false
+$resetCreditsItem.ToolTipText = '* Details are incomplete; this is the earliest known expiry. Times are local.'
+$menu.ShowItemToolTips = $true
+[void]$menu.Items.Add($resetCreditsItem)
 
 $updatedItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $updatedItem.Text = 'Updated: --'; $updatedItem.Enabled = $false
@@ -819,6 +871,8 @@ function Update-Usage {
         $statusItem.Text = "5h $fiveText% | W $weekText%"
         $fiveResetItem.Text = "5h reset: $(Format-ResetTime $usage.FiveHour)"
         $weekResetItem.Text = "W reset: $(Format-ResetTime $usage.Weekly -IncludeDate)"
+        $resetCreditsItem.Text = Format-ResetCredits $usage.ResetCredits
+        $script:Hud.ResetCredits.Text = Format-ResetCredits $usage.ResetCredits -Compact
         $updatedItem.Text = "Updated: $($usage.UpdatedAt.ToString('HH:mm:ss'))"
         $errorItem.Visible = $false
         $copyErrorItem.Enabled = $false
@@ -840,6 +894,8 @@ function Update-Usage {
         $statusItem.Text = 'Usage unavailable'
         $fiveResetItem.Text = '5h reset: --'
         $weekResetItem.Text = 'W reset: --'
+        $resetCreditsItem.Text = Format-ResetCredits $null
+        $script:Hud.ResetCredits.Text = 'Resets -- | Exp ERR'
         $updatedItem.Text = "Failed: $(Get-Date -Format 'HH:mm:ss')"
         $short = $message
         if ($short.Length -gt 180) { $short = $short.Substring(0, 177) + '...' }

@@ -86,6 +86,9 @@ try {
     Assert-True ($script:Hud.Form.Controls[0].Text -eq $Account) 'HUD account label missing.'
     Assert-True ($menu.Items[0].Text -eq $Account) 'Menu account label missing.'
     Assert-True ($exitItem.Text -eq "Exit $Account") 'Exit action is ambiguous.'
+    Assert-True ($script:Hud.Form.ClientSize.Height -eq 72) 'HUD height increased.'
+    Assert-True ($script:Hud.ResetCredits.Top -eq $script:Hud.Form.Controls[0].Top) 'Reset credits must share the account row.'
+    Assert-True ($script:Hud.ResetCredits.Left -ge $script:Hud.Form.Controls[0].Right) 'Reset credits overlap the account name.'
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $offset = if ($Account -eq 'ECC') { $script:Hud.Form.Height + 8 } else { 0 }
     Assert-True ($script:Hud.Form.Top -eq ($wa.Bottom - $script:Hud.Form.Height - 8 - $offset)) 'Incorrect HUD position.'
@@ -117,7 +120,9 @@ try {
     $script:RecoveryNotifications = 0
     function Invoke-CodexRateLimitRead {
         if ($script:FailRead) { throw 'Simulated account read failure' }
-        return [pscustomobject]@{ result = [pscustomobject]@{ rateLimits = [pscustomobject]@{
+        return [pscustomobject]@{ result = [pscustomobject]@{
+        rateLimitResetCredits = [pscustomobject]@{ availableCount = $script:Remaining; credits = $null }
+        rateLimits = [pscustomobject]@{
             planType = 'test'
             primary = [pscustomobject]@{ windowDurationMins = 300; usedPercent = (100 - $script:Remaining); resetsAt = 2000000000 }
             secondary = [pscustomobject]@{ windowDurationMins = 10080; usedPercent = 50; resetsAt = 2000000000 }
@@ -130,6 +135,9 @@ try {
     Assert-True ($notify.Text -like "$Account - 5h *") 'Tooltip lacks account or usage.'
     $cache = Get-Content $script:UsageCachePath -Raw | ConvertFrom-Json
     Assert-True ($cache.fiveHour.remainingPercent -eq $script:Remaining) 'Usage cache has incorrect data.'
+    Assert-True ($cache.resetCredits.AvailableCount -eq $script:Remaining) 'Reset credits cache has incorrect account data.'
+    Assert-True ($script:Hud.ResetCredits.Text -eq "Resets $($script:Remaining) | Exp --") 'HUD reset count is incorrect.'
+    Assert-True ($resetCreditsItem.Text -eq "Resets: $($script:Remaining) | Earliest expiry: --") 'Menu reset count is incorrect.'
 
     $savedRemaining = $script:Remaining
     $script:Remaining = 0
@@ -145,6 +153,7 @@ try {
     Update-Usage
     Assert-True ($script:LastError -eq 'Simulated account read failure') 'Read failure was not handled.'
     Assert-True ($notify.Text -like "$Account - Usage unavailable*") 'Error tooltip lacks account.'
+    Assert-True ($script:Hud.ResetCredits.Text -eq 'Resets -- | Exp ERR') 'Failed read left stale reset credits visible.'
     Assert-True ((Get-Content $script:UsageCachePath -Raw) -eq $cacheBefore) 'Failed read corrupted cache.'
     Assert-True (-not $script:RefreshInProgress) 'Failed read left refresh locked.'
     $script:FailRead = $false
