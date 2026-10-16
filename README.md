@@ -13,6 +13,17 @@ Windows side for the Android Codex / ChatGPT Work usage widget.
 
 Activated `Codex-CLI` is required.
 
+Drag anywhere on the extended tray HUD with the left mouse button to move it,
+including its labels and gauges. A left click without dragging hides the HUD;
+click the tray icon to show it again. The position is kept while running and
+resets to the default location on restart.
+
+Offline HUD interaction checks (no Codex requests):
+
+```powershell
+powershell -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-HudDrag.ps1
+```
+
 ## 1. Install/update
 
 ```powershell
