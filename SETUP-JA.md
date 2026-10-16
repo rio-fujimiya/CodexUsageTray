@@ -10,6 +10,36 @@ powershell -ExecutionPolicy Bypass -File .\Install.ps1
 
 最後に表示される **Android relay token** を控えます。
 
+起動すると **DEFAULT / ECC のトレイアイコンが1つずつ**表示されます。
+DEFAULT は `%USERPROFILE%\.codex`、ECC は `%USERPROFILE%\.codex-ecc` の
+認証を使うため、事前にそれぞれのアカウントでCLIにログインしてください。
+`cecc` / `cdefault` や起動元の `CODEX_HOME` に関係なく、両方を監視します。
+
+ECCのアイコン中央には暗い縁取りの白い「E」を重ね、DEFAULTと見分けられるようにしています。
+5時間・週間のバーは両アカウントとも元の幅・高さを維持し、Eの上下に残る余白で進捗を読めます。
+読み込み中・残量ゼロ・エラー時にも目印を表示します。
+既存の5時間・週間ゲージを使い、マウスを重ねた説明と右クリックメニュー、
+HUDにはアカウント名を表示します。HUDは上下に並び、表示切り替え・更新・終了は
+アカウントごとに操作できます。再起動しても同じアカウントのアイコンは増えません。
+片方が未ログインでも、そのアカウントだけエラー表示になり、もう片方は動作します。
+
+保存先は `%LOCALAPPDATA%\CodexUsageTray` 内の以下のファイルです。
+
+| アカウント | 回復通知の状態 | 使用量キャッシュ |
+| --- | --- | --- |
+| DEFAULT | `state.json` | `usage-cache.json` |
+| ECC | `state-ecc.json` | `usage-cache-ecc.json` |
+
+Androidへの配信は引き続きDEFAULTです。Android側のアカウント選択は今回の変更に含みません。
+
+インストールせずに確認する場合は `Run-Portable.cmd` で両方起動できます。
+片方だけ起動する場合:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\CodexUsageTray.ps1 -Account DEFAULT
+powershell -NoProfile -ExecutionPolicy Bypass -File .\CodexUsageTray.ps1 -Account ECC
+```
+
 relay確認:
 
 ```powershell

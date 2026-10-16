@@ -2,9 +2,30 @@
 # Windows notification-area monitor for ChatGPT Work / Codex shared agentic usage.
 # v2.0 ngrok - v1.8 UI plus usage-cache.json export for the local WAN relay.
 
+param(
+    [ValidateSet('DEFAULT', 'ECC')]
+    [string]$Account
+)
+
 $ErrorActionPreference = 'Stop'
 $RefreshSeconds = 60
 $RpcTimeoutMs = 15000
+
+# With no account specified, launch one independent monitor per account. Each
+# worker owns its UI, refresh timer and mutex, so failures remain independent.
+if (-not $Account) {
+    foreach ($name in @('DEFAULT', 'ECC')) {
+        $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" -Account ' + $name
+        Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $arguments -WindowStyle Hidden | Out-Null
+    }
+    exit 0
+}
+
+$Account = $Account.ToUpperInvariant()
+$codexDirectory = if ($Account -eq 'ECC') { '.codex-ecc' } else { '.codex' }
+# Pin the worker and all its children (including diagnostics) to the selected
+# home, regardless of the terminal/account switcher that launched the tray.
+$env:CODEX_HOME = Join-Path $env:USERPROFILE $codexDirectory
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -23,14 +44,18 @@ namespace CodexUsageTray {
 "@
 }
 
-$script:Mutex = New-Object System.Threading.Mutex($false, 'Local\CodexUsageTray')
+$mutexName = if ($Account -eq 'ECC') { 'Local\CodexUsageTray-ECC' } else { 'Local\CodexUsageTray' }
+$script:Mutex = New-Object System.Threading.Mutex($false, $mutexName)
 if (-not $script:Mutex.WaitOne(0, $false)) { exit 0 }
 
 $script:RefreshInProgress = $false
 $script:CurrentIcon = $null
 $script:LastError = ''
-$script:StatePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') 'state.json'
-$script:UsageCachePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') 'usage-cache.json'
+# Preserve DEFAULT's existing paths for the Android relay and recovery state.
+$stateFile = if ($Account -eq 'ECC') { 'state-ecc.json' } else { 'state.json' }
+$cacheFile = if ($Account -eq 'ECC') { 'usage-cache-ecc.json' } else { 'usage-cache.json' }
+$script:StatePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') $stateFile
+$script:UsageCachePath = Join-Path (Join-Path $env:LOCALAPPDATA 'CodexUsageTray') $cacheFile
 $script:RecoveryState = $null
 
 $script:TrayClickTimer = $null
@@ -46,7 +71,7 @@ function Open-ChatGPTApp {
         try {
             [System.Windows.Forms.MessageBox]::Show(
                 "Could not open the configured ChatGPT app shortcut.`r`n`r`nTarget: $appId",
-                'Codex Usage Tray'
+                "Codex Usage Tray - $Account"
             ) | Out-Null
         } catch {}
     }
@@ -404,8 +429,8 @@ function Draw-GaugeBar {
 function New-UsageIcon {
     param($FiveHour, $Weekly, [bool]$HasError = $false)
 
-    # The tray icon is tiny, so use only two edge-to-edge bars:
-    # top = 5h, bottom = weekly. No surrounding frame/border.
+    # Top = 5h, bottom = weekly. Keep both gauges full size; ECC's centered
+    # E leaves the upper/lower edges of the bars visible for reading progress.
     # A bucket at 0% is rendered as a red X across that row.
     $bmp = New-Object System.Drawing.Bitmap 32, 32
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -415,6 +440,28 @@ function New-UsageIcon {
     try {
         Draw-GaugeBar $g 0 2 32 12 $FiveHour $HasError
         Draw-GaugeBar $g 0 18 32 12 $Weekly $HasError
+        if ($Account -eq 'ECC') {
+            # Draw the letter as a fixed path to avoid font-dependent alignment.
+            # A dark outline keeps the white E legible against every gauge color.
+            $letter = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $marker = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+            $outline = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(31, 34, 38)), 2
+            $outline.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+            try {
+                $letter.AddPolygon([System.Drawing.PointF[]]@(
+                    [System.Drawing.PointF]::new(10, 8), [System.Drawing.PointF]::new(22, 8),
+                    [System.Drawing.PointF]::new(22, 11), [System.Drawing.PointF]::new(14, 11),
+                    [System.Drawing.PointF]::new(14, 14), [System.Drawing.PointF]::new(21, 14),
+                    [System.Drawing.PointF]::new(21, 17), [System.Drawing.PointF]::new(14, 17),
+                    [System.Drawing.PointF]::new(14, 21), [System.Drawing.PointF]::new(22, 21),
+                    [System.Drawing.PointF]::new(22, 24), [System.Drawing.PointF]::new(10, 24)
+                ))
+                $g.DrawPath($outline, $letter)
+                $g.FillPath($marker, $letter)
+            } finally {
+                $letter.Dispose(); $marker.Dispose(); $outline.Dispose()
+            }
+        }
     } finally {
         $g.Dispose()
     }
@@ -431,14 +478,14 @@ function New-Hud {
     # 5h [quota bar + percentage] HH:mm when reset is today, otherwise MM/dd
     # W  [quota bar + percentage] HH:mm when reset is today, otherwise MM/dd
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Codex Usage'
+    $form.Text = "Codex Usage - $Account"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
     $form.ShowInTaskbar = $false
     $form.TopMost = $true
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $form.BackColor = [System.Drawing.Color]::FromArgb(31, 34, 38)
     $form.ForeColor = [System.Drawing.Color]::White
-    $form.ClientSize = New-Object System.Drawing.Size(228, 54)
+    $form.ClientSize = New-Object System.Drawing.Size(228, 72)
     $form.Opacity = 0.84
 
     $fontLabel = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -486,13 +533,24 @@ function New-Hud {
     $weekReset.Location = New-Object System.Drawing.Point(169, 28)
     $weekReset.Size = New-Object System.Drawing.Size(51, 21)
 
+    $accountLabel = New-Object System.Windows.Forms.Label
+    $accountLabel.Text = $Account
+    $accountLabel.Font = $fontLabel
+    $accountLabel.Location = New-Object System.Drawing.Point(8, 0)
+    $accountLabel.Size = New-Object System.Drawing.Size(212, 18)
+    foreach ($control in @($fiveLabel, $fiveBar, $fiveReset, $weekLabel, $weekBar, $weekReset)) {
+        $control.Top += 18
+    }
+
     [void]$form.Controls.AddRange(@(
+        $accountLabel,
         $fiveLabel, $fiveBar, $fiveReset,
         $weekLabel, $weekBar, $weekReset
     ))
 
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $form.Location = New-Object System.Drawing.Point(($wa.Right - $form.Width - 8), ($wa.Bottom - $form.Height - 8))
+    $accountOffset = if ($Account -eq 'ECC') { $form.Height + 8 } else { 0 }
+    $form.Location = New-Object System.Drawing.Point(($wa.Right - $form.Width - 8), ($wa.Bottom - $form.Height - 8 - $accountOffset))
 
     # A left-button press anywhere on the HUD hides it immediately.
     $hideHudNow = {
@@ -509,7 +567,7 @@ function New-Hud {
         }
     }
     $form.add_MouseDown($hideHudNow)
-    foreach ($c in @($fiveLabel, $fiveBar, $fiveReset, $weekLabel, $weekBar, $weekReset)) {
+    foreach ($c in @($accountLabel, $fiveLabel, $fiveBar, $fiveReset, $weekLabel, $weekBar, $weekReset)) {
         $c.add_MouseDown($hideHudNow)
     }
 
@@ -592,9 +650,13 @@ $script:Hud = New-Hud
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Visible = $true
-$notify.Text = 'Codex usage: loading...'
+$notify.Text = "$Account - Codex usage: loading..."
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
+$accountItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$accountItem.Text = $Account; $accountItem.Enabled = $false
+[void]$menu.Items.Add($accountItem)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 $statusItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $statusItem.Text = '5h --% | W --%'; $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
@@ -637,7 +699,7 @@ $openUsageItem.Text = 'Open ChatGPT usage'; [void]$menu.Items.Add($openUsageItem
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$exitItem.Text = 'Exit'; [void]$menu.Items.Add($exitItem)
+$exitItem.Text = "Exit $Account"; [void]$menu.Items.Add($exitItem)
 $notify.ContextMenuStrip = $menu
 
 function Set-TrayIcon {
@@ -654,7 +716,7 @@ function Show-RecoveredNotification {
     try {
         $five = Format-Remaining $Usage.FiveHour
         $week = Format-Remaining $Usage.Weekly
-        $notify.BalloonTipTitle = 'Work / Codex is available again'
+        $notify.BalloonTipTitle = "$Account - Work / Codex is available again"
         $notify.BalloonTipText = "Usage limit reset. 5h $five% | W $week%"
         $notify.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
         $notify.ShowBalloonTip(7000)
@@ -724,7 +786,7 @@ function Update-Usage {
         $errorItem.Visible = $false
         $copyErrorItem.Enabled = $false
         $script:LastError = ''
-        $tip = "5h $fiveText% | W $weekText%"
+        $tip = "$Account - 5h $fiveText% | W $weekText%"
         if ($tip.Length -gt 63) { $tip = $tip.Substring(0, 63) }
         $notify.Text = $tip
         Set-HudWindow $script:Hud.FiveBar $usage.FiveHour $false
@@ -747,7 +809,7 @@ function Update-Usage {
         $errorItem.Text = "Error: $short"
         $errorItem.Visible = $true
         $copyErrorItem.Enabled = $true
-        $notify.Text = 'Codex usage unavailable - right-click for error'
+        $notify.Text = "$Account - Usage unavailable - right-click for error"
         Set-HudWindow $script:Hud.FiveBar $null $true
         Set-HudWindow $script:Hud.WeekBar $null $true
         $script:Hud.FiveReset.Text = 'ERR'
