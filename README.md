@@ -24,6 +24,11 @@ Offline HUD interaction checks (no Codex requests):
 powershell -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-HudDrag.ps1
 ```
 
+For OS mouse input checks, add `-NativeInput`. This briefly moves the pointer;
+avoid using the mouse until the checks finish. The pointer is restored afterward.
+After updating the source, update the installed copy and restart the tray to
+apply the change to an already running monitor.
+
 ## DEFAULT / ECC accounts
 
 Starting `CodexUsageTray.ps1` without arguments launches two tray monitors:
