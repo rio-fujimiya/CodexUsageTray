@@ -552,23 +552,60 @@ function New-Hud {
     $accountOffset = if ($Account -eq 'ECC') { $form.Height + 8 } else { 0 }
     $form.Location = New-Object System.Drawing.Point(($wa.Right - $form.Width - 8), ($wa.Bottom - $form.Height - 8 - $accountOffset))
 
-    # A left-button press anywhere on the HUD hides it immediately.
-    $hideHudNow = {
+    # Defer click-to-hide until release so a drag can move the frameless HUD.
+    $script:HudDrag = $null
+    $startHudDrag = {
         param($sender, $e)
         if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-            try {
-                if ($null -ne $script:Hud -and $null -ne $script:Hud.Form) {
-                    $script:Hud.Form.Hide()
-                }
-                if ($null -ne $script:HudMenuItem) {
-                    $script:HudMenuItem.Checked = $false
-                }
-            } catch {}
+            $script:HudDrag = @{
+                Start = $sender.PointToScreen($e.Location)
+                Origin = $sender.FindForm().Location
+                Moving = $false
+            }
+            $sender.Capture = $true
         }
     }
-    $form.add_MouseDown($hideHudNow)
-    foreach ($c in @($accountLabel, $fiveLabel, $fiveBar, $fiveReset, $weekLabel, $weekBar, $weekReset)) {
-        $c.add_MouseDown($hideHudNow)
+    $moveHud = {
+        param($sender, $e)
+        if ($null -eq $script:HudDrag) { return }
+        $point = $sender.PointToScreen($e.Location)
+        $dx = $point.X - $script:HudDrag.Start.X
+        $dy = $point.Y - $script:HudDrag.Start.Y
+        $threshold = [System.Windows.Forms.SystemInformation]::DragSize
+        if (-not $script:HudDrag.Moving -and
+            ([Math]::Abs($dx) -ge $threshold.Width / 2 -or
+             [Math]::Abs($dy) -ge $threshold.Height / 2)) {
+            $script:HudDrag.Moving = $true
+        }
+        if ($script:HudDrag.Moving) {
+            $sender.FindForm().Location = New-Object System.Drawing.Point(
+                ($script:HudDrag.Origin.X + $dx), ($script:HudDrag.Origin.Y + $dy))
+        }
+    }
+    $finishHudDrag = {
+        param($sender, $e)
+        if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left -or
+            $null -eq $script:HudDrag) { return }
+        $wasMoving = $script:HudDrag.Moving
+        $script:HudDrag = $null
+        $sender.Capture = $false
+        if (-not $wasMoving) {
+            $sender.FindForm().Hide()
+            if ($null -ne $script:HudMenuItem) {
+                $script:HudMenuItem.Checked = $false
+            }
+        }
+    }
+    $cancelHudDrag = {
+        param($sender, $e)
+        if (-not $sender.Capture) { $script:HudDrag = $null }
+    }
+    foreach ($c in @($form) + @($form.Controls)) {
+        $c.Cursor = [System.Windows.Forms.Cursors]::SizeAll
+        $c.add_MouseDown($startHudDrag)
+        $c.add_MouseMove($moveHud)
+        $c.add_MouseUp($finishHudDrag)
+        $c.add_MouseCaptureChanged($cancelHudDrag)
     }
 
     [pscustomobject]@{
