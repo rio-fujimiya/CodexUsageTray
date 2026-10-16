@@ -18,6 +18,15 @@ including its labels and gauges. A left click without dragging hides the HUD;
 click the tray icon to show it again. The position is kept while running and
 resets to the default location on restart.
 
+The right-click menu and third HUD row show saved reset count and earliest
+expiry in local time. `--` means unavailable, `none` means no resets remain,
+and `no expiry` means all available resets have no expiry. A date marked `*`
+is the earliest known expiry because the service returned incomplete details.
+Reset credits are only read, never consumed. Requires a CLI version that returns
+`rateLimitResetCredits` from `account/rateLimits/read`.
+
+Offline reset-credit checks: `powershell -NoProfile -File .\Test-ResetCredits.ps1`.
+
 Offline HUD interaction checks (no Codex requests):
 
 ```powershell
