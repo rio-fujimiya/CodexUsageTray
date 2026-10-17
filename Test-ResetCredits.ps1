@@ -4,7 +4,7 @@ $tokens = $null; $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(
     (Join-Path $PSScriptRoot 'CodexUsageTray.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
-foreach ($name in @('Get-PropertyValue', 'Convert-Window', 'Convert-ResetCredits', 'Format-ResetCredits', 'Get-CodexUsage', 'New-Hud')) {
+foreach ($name in @('Get-PropertyValue', 'Convert-Window', 'Convert-ResetCredits', 'Format-ResetCredits', 'Format-HudReset', 'Get-CodexUsage', 'New-Hud')) {
     $definition = $ast.Find({ param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -34,6 +34,10 @@ Assert ($credits.AvailableCount -eq 3 -and $credits.EarliestExpiresAt -eq $early
 Assert $credits.DetailsComplete 'Available detail completeness is incorrect.'
 $expected = [DateTimeOffset]::FromUnixTimeSeconds($early).ToLocalTime().ToString('MM/dd HH:mm')
 Assert ((Format-ResetCredits $credits -Compact) -eq "R 3 | $expected") 'HUD date is incorrect.'
+$soon = [DateTimeOffset]::Now.AddHours(24).AddSeconds(-10)
+$later = [DateTimeOffset]::Now.AddHours(25)
+Assert ((Format-HudReset ([pscustomobject]@{ ResetsAt = $soon.ToUnixTimeSeconds() })) -eq $soon.ToLocalTime().ToString('HH:mm')) 'HUD reset within 24 hours must show time.'
+Assert ((Format-HudReset ([pscustomobject]@{ ResetsAt = $later.ToUnixTimeSeconds() })) -eq $later.ToLocalTime().ToString('MM/dd')) 'HUD reset beyond 24 hours must show date.'
 Assert ((Format-ResetCredits $null) -eq 'Resets: -- | Earliest expiry: --') 'Missing summary must be unknown.'
 $countOnly = Convert-ResetCredits ([pscustomobject]@{availableCount = 2; credits = $null})
 Assert ((Format-ResetCredits $countOnly -Compact) -eq 'R 2 | --') 'Count-only response must not imply no expiry.'

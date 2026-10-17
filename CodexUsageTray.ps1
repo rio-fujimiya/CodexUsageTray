@@ -343,7 +343,10 @@ function Format-HudReset {
     try {
         $local = [DateTimeOffset]::FromUnixTimeSeconds([long]$Window.ResetsAt).ToLocalTime()
         $now = [DateTimeOffset]::Now
-        if ($local.Date -eq $now.Date) { return $local.ToString('HH:mm') }
+        if ($local.Date -eq $now.Date -or
+            ($local -gt $now -and $local -le $now.AddHours(24))) {
+            return $local.ToString('HH:mm')
+        }
         return $local.ToString('MM/dd')
     } catch { return '--/--' }
 }
